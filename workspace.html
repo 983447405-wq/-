@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Video WebM/WebP Compressor</title>
+    <link rel="stylesheet" href="workspace.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <div class="brand-row">
+            <span class="brand-dots" aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </span>
+            <p class="eyebrow">Local FFmpeg Compressor</p>
+          </div>
+          <h1>视频压缩</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="切换为暗色模式" title="切换亮色/暗色">
+            <svg class="theme-icon theme-sun" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 4V2"></path>
+              <path d="M12 22v-2"></path>
+              <path d="m4.93 4.93 1.41 1.41"></path>
+              <path d="m17.66 17.66 1.41 1.41"></path>
+              <path d="M4 12H2"></path>
+              <path d="M22 12h-2"></path>
+              <path d="m6.34 17.66-1.41 1.41"></path>
+              <path d="m19.07 4.93-1.41 1.41"></path>
+              <path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"></path>
+            </svg>
+            <svg class="theme-icon theme-moon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 14.6A8 8 0 0 1 9.4 4a7 7 0 1 0 10.6 10.6Z"></path>
+            </svg>
+          </button>
+          <div class="engine-state" id="engineState">引擎待加载</div>
+        </div>
+      </header>
+
+      <section class="control-band">
+        <label class="drop-zone" id="dropZone">
+          <input id="fileInput" type="file" accept="video/*" multiple>
+          <span class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 28 28">
+              <path class="cloud-line" d="M8.6 20.5H19a5.1 5.1 0 0 0 .9-10.1A7 7 0 0 0 6.4 12a4.3 4.3 0 0 0 2.2 8.5Z"></path>
+              <path class="arrow-line" d="M14 18V9.8"></path>
+              <path class="arrow-line" d="m10.8 13 3.2-3.2 3.2 3.2"></path>
+            </svg>
+          </span>
+          <span class="drop-title">选择或拖入视频</span>
+          <span class="drop-meta">MP4, MOV, WEBM, AVI, MKV</span>
+        </label>
+
+        <form class="settings" id="settingsForm">
+          <label>
+            <span>输出格式</span>
+            <select id="formatSelect">
+              <option value="webm" selected>WebM 更小</option>
+              <option value="webp">WebP 动图</option>
+            </select>
+          </label>
+          <label>
+            <span>最大宽度</span>
+            <select id="widthSelect">
+              <option value="source" selected>原始宽度</option>
+              <option value="720">720 px</option>
+              <option value="1080">1080 px</option>
+              <option value="480">480 px</option>
+              <option value="360">360 px</option>
+            </select>
+          </label>
+          <label>
+            <span>帧率</span>
+            <input id="fpsInput" type="number" min="1" max="60" placeholder="原始帧率">
+          </label>
+          <label>
+            <span>质量</span>
+            <input id="qualityInput" type="range" min="30" max="95" value="92">
+            <output id="qualityOutput">92</output>
+          </label>
+          <label>
+            <span>压缩等级</span>
+            <select id="levelSelect">
+              <option value="2" selected>轻微压缩</option>
+              <option value="4">标准</option>
+              <option value="6">更小</option>
+            </select>
+          </label>
+        </form>
+      </section>
+
+      <section class="action-row" aria-label="转换操作">
+        <button class="primary" id="convertAll" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 5v14l11-7-11-7Z"></path>
+            <path d="M4 7h2"></path>
+            <path d="M3 12h3"></path>
+            <path d="M4 17h2"></path>
+          </svg>
+          开始转换
+        </button>
+        <button id="downloadAll" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3v12"></path>
+            <path d="M7 10l5 5 5-5"></path>
+            <path d="M5 21h14"></path>
+          </svg>
+          <span id="downloadLabel">下载全部 WebM</span>
+        </button>
+        <button id="clearAll" type="button" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h16"></path>
+            <path d="M10 11v6"></path>
+            <path d="M14 11v6"></path>
+            <path d="M6 7l1 14h10l1-14"></path>
+            <path d="M9 7V4h6v3"></path>
+          </svg>
+          清空
+        </button>
+      </section>
+
+      <section class="queue-panel">
+        <div class="queue-head">
+          <h2>队列</h2>
+          <span id="summary">0 个文件</span>
+        </div>
+        <div class="empty-state" id="emptyState">等待视频文件</div>
+        <div class="job-list" id="jobList"></div>
+      </section>
+
+      <section class="log-panel">
+        <div class="queue-head">
+          <h2>日志</h2>
+          <button class="text-button" id="toggleLog" type="button">展开</button>
+        </div>
+        <pre id="logBox" hidden></pre>
+      </section>
+    </main>
+
+    <script src="vendor/ffmpeg/ffmpeg.js"></script>
+    <script src="vendor/ffmpeg/util.js"></script>
+    <script src="workspace.js"></script>
+  </body>
+</html>
