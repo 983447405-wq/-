@@ -441,6 +441,86 @@ async function readOutputBlob(ffmpeg, outputName, mimeType) {
   return new Blob([output], { type: mimeType });
 }
 
+function isWrapperStartsWithError(error) {
+  return getErrorMessage(error).includes("startsWith");
+}
+
+function validateVideoBlob(blob) {
+  return new Promise((resolve, reject) => {
+    if (!blob || blob.size <= 0) {
+      reject(new Error("输出文件为空"));
+      return;
+    }
+
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(blob);
+    let settled = false;
+    const cleanup = () => {
+      URL.revokeObjectURL(url);
+      video.remove();
+    };
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      if (video.videoWidth !== 600) {
+        finish(reject, new Error(`输出宽度为 ${video.videoWidth}，不是 600`));
+        return;
+      }
+      if (video.videoHeight % 2 !== 0) {
+        finish(reject, new Error(`输出高度为 ${video.videoHeight}，不是偶数`));
+        return;
+      }
+      finish(resolve, {
+        width: video.videoWidth,
+        height: video.videoHeight,
+        duration: video.duration
+      });
+    };
+    video.onerror = () => finish(reject, new Error("输出 WebM 无法被浏览器读取"));
+    video.src = url;
+    setTimeout(() => finish(reject, new Error("读取输出 WebM 元数据超时")), 5000);
+  });
+}
+
+async function readValidatedOutput(ffmpeg, outputName, mimeType) {
+  const blob = await readOutputBlob(ffmpeg, outputName, mimeType);
+  await validateVideoBlob(blob);
+  return blob;
+}
+
+async function recoverOutputAfterWrapperError(ffmpeg, outputName, mimeType, error, label) {
+  if (!isWrapperStartsWithError(error)) return null;
+  try {
+    const blob = await readValidatedOutput(ffmpeg, outputName, mimeType);
+    logLine(`${label} produced a valid WebM despite FFmpeg wrapper error; using recovered output.`);
+    return blob;
+  } catch (readError) {
+    logLine(`${label} recovery failed: ${getErrorMessage(readError)}`);
+    return null;
+  }
+}
+
+async function execAndReadOutput(ffmpeg, args, outputName, mimeType, label) {
+  let exitCode;
+  try {
+    exitCode = await ffmpeg.exec(args);
+  } catch (error) {
+    const recoveredBlob = await recoverOutputAfterWrapperError(ffmpeg, outputName, mimeType, error, label);
+    if (recoveredBlob) return recoveredBlob;
+    throw error;
+  }
+  if (exitCode !== 0) {
+    throw new Error(`FFmpeg 退出码 ${exitCode}`);
+  }
+  return readValidatedOutput(ffmpeg, outputName, mimeType);
+}
+
 function getSmallerRetryBitrateKbps(job, currentTargetKbps) {
   const sourceKbps = getSourceBitrateKbps(job);
   if (job.file.size < 3 * 1024 * 1024) {
@@ -495,51 +575,36 @@ async function convertJob(job) {
   if (settings.format === "webm") {
     logLine(`Target video bitrate: ${targetBitrateKbps} kbps (${primaryCodec.toUpperCase()} + OPUS).`);
   }
-  let exitCode;
   try {
-    exitCode = await ffmpeg.exec([
+    job.outputBlob = await execAndReadOutput(ffmpeg, [
       ...inputArgs,
       ...buildOutputArgs(settings, outputName, { includeAudio: true })
-    ]);
+    ], outputName, job.outputMime, "VP9 + Opus");
   } catch (error) {
     if (settings.format !== "webm") throw error;
     logLine(`VP9 + Opus failed in browser wasm: ${getErrorMessage(error)}; retrying VP9 video-only compatibility mode.`);
+    await cleanupFFmpegFiles(outputName);
     await reloadFFmpeg();
     ffmpeg = state.ffmpeg;
     await ffmpeg.writeFile(job.inputName, await fetchFile(job.file));
-    exitCode = await ffmpeg.exec([
+    job.outputBlob = await execAndReadOutput(ffmpeg, [
       ...inputArgs,
       ...buildOutputArgs(settings, outputName, { includeAudio: false })
-    ]);
-  }
-  if (exitCode !== 0 && settings.format === "webm") {
-    logLine(`VP9 + Opus failed with code ${exitCode}; retrying VP9 video-only compatibility mode.`);
-    await cleanupFFmpegFiles(outputName);
-    exitCode = await ffmpeg.exec([
-      ...inputArgs,
-      ...buildOutputArgs(settings, outputName, { includeAudio: false })
-    ]);
-  }
-  if (exitCode !== 0) {
-    throw new Error(`FFmpeg 退出码 ${exitCode}`);
+    ], outputName, job.outputMime, "VP9 video-only");
   }
 
-  job.outputBlob = await readOutputBlob(ffmpeg, outputName, job.outputMime);
   if (shouldRetryForSmallerOutput(job, settings)) {
     const retryBitrateKbps = getSmallerRetryBitrateKbps(job, targetBitrateKbps);
     logLine(`Output exceeds size target; retrying at ${retryBitrateKbps} kbps.`);
     await cleanupFFmpegFiles(outputName);
-    exitCode = await ffmpeg.exec([
+    const smallerBlob = await execAndReadOutput(ffmpeg, [
       ...inputArgs,
       ...buildOutputArgs(settings, outputName, {
         includeAudio: false
       })
-    ]);
-    if (exitCode === 0) {
-      const smallerBlob = await readOutputBlob(ffmpeg, outputName, job.outputMime);
-      if (smallerBlob.size <= job.outputBlob.size) {
-        job.outputBlob = smallerBlob;
-      }
+    ], outputName, job.outputMime, "VP9 smaller retry");
+    if (smallerBlob.size <= job.outputBlob.size) {
+      job.outputBlob = smallerBlob;
     }
   }
   job.outputBytes = job.outputBlob.size;
