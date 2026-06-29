@@ -34,6 +34,17 @@ const els = {
   toggleLog: document.getElementById("toggleLog")
 };
 
+const WEBM_PRESET = {
+  format: "webm",
+  width: "600",
+  fpsCap: 30,
+  videoBitrate: "1.5M",
+  maxrate: "1.5M",
+  bufsize: "3M",
+  crf: 31,
+  audioBitrate: "96k"
+};
+
 const STATUS_LABELS = {
   queued: "待转换",
   reading: "读取中",
@@ -120,16 +131,12 @@ function readMetadata(job) {
 }
 
 function getSettings() {
-  const fpsValue = els.fpsInput.value.trim();
-  const fps = fpsValue ? Math.max(1, Math.min(60, Number.parseInt(fpsValue, 10) || 0)) : null;
-  const quality = Math.max(30, Math.min(95, Number.parseInt(els.qualityInput.value, 10) || 92));
-  const compression = Number.parseInt(els.levelSelect.value, 10) || 2;
   return {
-    format: els.formatSelect.value,
-    width: els.widthSelect.value,
-    fps,
-    quality,
-    compression
+    format: WEBM_PRESET.format,
+    width: WEBM_PRESET.width,
+    fps: WEBM_PRESET.fpsCap,
+    quality: WEBM_PRESET.crf,
+    compression: 2
   };
 }
 
@@ -146,7 +153,7 @@ function getOutputMime(format) {
 }
 
 function getSettingsSignature(settings = getSettings()) {
-  return [settings.format, settings.width, settings.fps || "source-fps", settings.quality, settings.compression].join("|");
+  return [settings.format, settings.width, `max-${settings.fps}-fps`, `vp9-crf-${WEBM_PRESET.crf}`, WEBM_PRESET.videoBitrate, `opus-${WEBM_PRESET.audioBitrate}`].join("|");
 }
 
 function needsConversion(job) {
@@ -263,103 +270,38 @@ function getOutputRatioBitrateKbps(job, outputRatio, safety = 0.94) {
 }
 
 function getPrimaryCodec(settings) {
-  return settings.format === "webm" && settings.compression <= 2 ? "vp9" : "vp8";
+  return "vp9";
 }
 
 function getFallbackCodec(codec) {
-  return codec === "vp9" ? "vp8" : "vp9";
+  return "vp9";
 }
 
 function getTargetBitrateKbps(job, settings) {
-  const profile = getCompressionProfile(settings.compression);
-  const sourceKbps = getSourceBitrateKbps(job);
-  const sourceBasedKbps = sourceKbps ? Math.round(sourceKbps * profile.ratio) : profile.minKbps;
-  if (job.file.size < 3 * 1024 * 1024) {
-    const smallProfile = getSmallFileProfile(job.file.size, settings.compression);
-    const smallSourceKbps = sourceKbps ? Math.round(sourceKbps * smallProfile.ratio) : smallProfile.fallbackKbps;
-    const targetCapKbps = getOutputRatioBitrateKbps(job, smallProfile.targetOutputRatio || smallProfile.maxOutputRatio);
-    const cappedKbps = targetCapKbps ? Math.min(smallSourceKbps, targetCapKbps) : smallSourceKbps;
-    const dynamicMinKbps = targetCapKbps ? Math.min(smallProfile.minKbps, targetCapKbps) : smallProfile.minKbps;
-    return clamp(cappedKbps, dynamicMinKbps, Math.min(smallProfile.maxKbps, profile.maxKbps));
-  }
-  if (job.file.size <= 6 * 1024 * 1024) {
-    const mediumProfile = getMediumFileProfile(job.file.size, settings.compression);
-    const mediumSourceKbps = sourceKbps ? Math.round(sourceKbps * mediumProfile.ratio) : mediumProfile.fallbackKbps;
-    return clamp(mediumSourceKbps, mediumProfile.minKbps, Math.min(mediumProfile.maxKbps, profile.maxKbps));
-  }
-  if (job.file.size > 3 * 1024 * 1024) {
-    const largeSourceKbps = sourceKbps ? Math.round(sourceKbps * profile.largeRatio) : profile.largeMinKbps;
-    return clamp(largeSourceKbps, profile.largeMinKbps, profile.largeMaxKbps);
-  }
-  return clamp(Math.max(sourceBasedKbps, profile.minKbps), profile.minKbps, profile.maxKbps);
+  return 1500;
 }
 
 function buildOutputArgs(settings, outputName, options = {}) {
-  const { codec = "vp8", targetBitrateKbps = null, sourceBytes = Infinity, retrySmaller = false } = options;
-  if (settings.format === "webp") {
-    const webpQuality = retrySmaller ? Math.min(settings.quality, 82) : settings.quality;
-    return [
-      "-an",
-      "-map", "0:v:0",
-      "-c:v", "libwebp",
-      "-lossless", "0",
-      "-q:v", String(webpQuality),
-      "-compression_level", String(settings.compression),
-      "-loop", "0",
-      "-preset", "default",
-      outputName
-    ];
-  }
-
-  const profile = getCompressionProfile(settings.compression);
-  const encodingProfile = getWebmEncodingProfile(profile, settings, sourceBytes);
-  const useSmallSizeControl = sourceBytes < 3 * 1024 * 1024;
-  const useMediumCrf = sourceBytes > 3 * 1024 * 1024 && sourceBytes <= 6 * 1024 * 1024;
-  const maxRateKbps = useSmallSizeControl && targetBitrateKbps ? Math.round(targetBitrateKbps * 1.12) : null;
-  const bufferKbps = useSmallSizeControl && targetBitrateKbps ? Math.round(targetBitrateKbps * 2) : null;
-  const rateControlArgs = useSmallSizeControl && targetBitrateKbps ? ["-maxrate", `${maxRateKbps}k`, "-bufsize", `${bufferKbps}k`] : [];
-  if (codec === "vp9") {
-    return [
-      "-an",
-      "-map", "0:v:0",
-      "-c:v", "libvpx-vp9",
-      "-b:v", `${targetBitrateKbps || 1800}k`,
-      ...rateControlArgs,
-      "-crf", String(useSmallSizeControl || retrySmaller ? getSmallFileCrf(getVp9Crf(settings.quality, settings.compression), settings.compression, sourceBytes, retrySmaller) : useMediumCrf ? getMediumFileCrf(getVp9Crf(settings.quality, settings.compression), settings.compression, sourceBytes) : getVp9Crf(settings.quality, settings.compression)),
-      "-deadline", encodingProfile.deadline,
-      "-cpu-used", encodingProfile.cpuUsed,
-      "-threads", "1",
-      "-pix_fmt", "yuv420p",
-      outputName
-    ];
-  }
-
   return [
-    "-an",
     "-map", "0:v:0",
-    "-c:v", "libvpx",
-    "-b:v", `${targetBitrateKbps || 1800}k`,
-    ...rateControlArgs,
-    "-crf", String(useSmallSizeControl || retrySmaller ? getSmallFileCrf(getVp8Crf(settings.quality, settings.compression), settings.compression, sourceBytes, retrySmaller) : useMediumCrf ? getMediumFileCrf(getVp8Crf(settings.quality, settings.compression), settings.compression, sourceBytes) : getVp8Crf(settings.quality, settings.compression)),
-    "-deadline", encodingProfile.deadline,
-    "-cpu-used", encodingProfile.cpuUsed,
-    "-threads", "1",
+    "-map", "0:a?",
+    "-c:v", "libvpx-vp9",
+    "-crf", String(WEBM_PRESET.crf),
+    "-b:v", WEBM_PRESET.videoBitrate,
+    "-maxrate", WEBM_PRESET.maxrate,
+    "-bufsize", WEBM_PRESET.bufsize,
+    "-row-mt", "1",
+    "-deadline", "good",
+    "-cpu-used", "4",
     "-pix_fmt", "yuv420p",
+    "-c:a", "libopus",
+    "-b:a", WEBM_PRESET.audioBitrate,
     outputName
   ];
 }
 
 function buildVideoFilter(settings) {
-  const filters = [];
-  if (settings.fps) {
-    filters.push(`fps=${settings.fps}`);
-  }
-  if (settings.width === "source") {
-    filters.push("scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos");
-    return filters.join(",");
-  }
-  filters.push(`scale='min(${settings.width},iw)':-2:flags=lanczos`);
-  return filters.join(",");
+  return `fps=fps='min(source_fps,${WEBM_PRESET.fpsCap})',scale=${WEBM_PRESET.width}:-2`;
 }
 
 function updateEngineState(text, busy = false) {
@@ -514,11 +456,7 @@ function getSmallerRetryBitrateKbps(job, currentTargetKbps) {
 }
 
 function shouldRetryForSmallerOutput(job, settings) {
-  if (job.file.size < 3 * 1024 * 1024) {
-    const profile = getSmallFileProfile(job.file.size, settings.compression);
-    return job.outputBlob.size > job.file.size * profile.maxOutputRatio;
-  }
-  return settings.compression > 2 && job.outputBlob.size > job.file.size;
+  return false;
 }
 
 async function convertJob(job) {

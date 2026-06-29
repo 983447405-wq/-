@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Video WebM/WebP Compressor",
-  "description": "Batch convert uploaded videos to compressed WebM or animated WebP files.",
-  "version": "1.8.0",
+  "name": "Video WebM Compressor",
+  "description": "Batch convert uploaded videos to WebM using VP9, Opus, 600px width, and capped 30fps.",
+  "version": "2.0.0",
   "permissions": [
     "downloads",
     "sidePanel"
@@ -11,7 +11,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Video WebM/WebP Compressor"
+    "default_title": "Video WebM Compressor"
   },
   "side_panel": {
     "default_path": "workspace.html"

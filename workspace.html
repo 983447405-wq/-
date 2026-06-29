@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Video WebM/WebP Compressor</title>
+    <title>Video WebM Compressor</title>
     <link rel="stylesheet" href="workspace.css">
   </head>
   <body>
@@ -56,36 +56,29 @@
         <form class="settings" id="settingsForm">
           <label>
             <span>输出格式</span>
-            <select id="formatSelect">
-              <option value="webm" selected>WebM 更小</option>
-              <option value="webp">WebP 动图</option>
+            <select id="formatSelect" disabled>
+              <option value="webm" selected>WebM · VP9 + Opus</option>
             </select>
           </label>
           <label>
-            <span>最大宽度</span>
-            <select id="widthSelect">
-              <option value="source" selected>原始宽度</option>
-              <option value="720">720 px</option>
-              <option value="1080">1080 px</option>
-              <option value="480">480 px</option>
-              <option value="360">360 px</option>
+            <span>输出宽度</span>
+            <select id="widthSelect" disabled>
+              <option value="600" selected>600 px</option>
             </select>
           </label>
           <label>
             <span>帧率</span>
-            <input id="fpsInput" type="number" min="1" max="60" placeholder="原始帧率">
+            <input id="fpsInput" type="number" min="1" max="30" value="30" disabled>
           </label>
           <label>
-            <span>质量</span>
-            <input id="qualityInput" type="range" min="30" max="95" value="92">
-            <output id="qualityOutput">92</output>
+            <span>VP9 CRF</span>
+            <input id="qualityInput" type="range" min="0" max="63" value="31" disabled>
+            <output id="qualityOutput">31</output>
           </label>
           <label>
-            <span>压缩等级</span>
-            <select id="levelSelect">
-              <option value="2" selected>轻微压缩</option>
-              <option value="4">标准</option>
-              <option value="6">更小</option>
+            <span>码率上限</span>
+            <select id="levelSelect" disabled>
+              <option value="2" selected>1.5M video / 96k audio</option>
             </select>
           </label>
         </form>

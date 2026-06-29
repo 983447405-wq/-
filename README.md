@@ -1,31 +1,75 @@
-# Video WebM/WebP Compressor
+# Video WebM Compressor
 
-Version: `1.8.0`
+Version: `2.0.0`
 
-Chrome MV3 extension for batch converting uploaded videos into compressed WebM files by default. Animated WebP output is still available as an option.
+Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM with VP9 video and Opus audio.
 
-## 安装
+## Chrome 插件安装
 
 1. 打开 `chrome://extensions/`。
 2. 开启右上角的「开发者模式」。
 3. 点击「加载已解压的扩展程序」。
-4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-1.8.0.zip` 后选择解压目录。
+4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.0.zip` 后选择解压目录。
 
-## 使用
+## 插件转换参数
 
-1. 点击扩展图标，打开浏览器右侧的转换面板。
-2. 选择或拖入多个视频。
-3. 默认输出 `WebM`，也可以切换为 `WebP`。最大宽度和帧率默认保持原始视频。
-4. 点击「开始转换」。
-5. 点击「下载全部 WebM」，文件会进入 Chrome 默认下载目录下的同一个子文件夹，例如 `VideoWebM-20260529-150000/`。
+- 输出格式固定为 `WebM`。
+- 视频编码固定为 `libvpx-vp9`。
+- 音频编码固定为 `libopus`，音频码率 `96k`。
+- 输出宽度固定为 `600px`，高度按比例自适应并保持偶数。
+- 帧率保持原始帧率，但最高不超过 `30fps`。
+- VP9 使用 CRF 受限质量模式：`-crf 31 -b:v 1.5M -maxrate 1.5M -bufsize 3M`。
+- 像素格式固定为 `yuv420p`。
 
-## 说明
+插件在浏览器沙盒内运行，只能处理上传文件并下载转换结果；浏览器插件不能直接重命名你磁盘上的原文件。
 
-- 转换在本机浏览器内完成，不上传视频。
-- 默认输出为 `.webm`，压缩等级默认是「轻微压缩」；轻微压缩使用 VP9 保真优先编码并去除音频，适合画质优先的批量处理。
-- 可选输出为 `.webp`，适合短视频动图和网页素材。
-- 小于 3MB 的视频会使用阶梯小文件保清晰策略：`<1MB`、`1-2MB`、`2-3MB` 分别按目标输出体积反推码率；「轻微压缩」允许小文件适度变大来保画质，例如 600KB 文件可进入约 700-900KB 区间，超过上限才会轻度降码率重试。
-- 3-6MB 的视频会使用中等文件阶梯策略；其中 3-4MB 默认轻微压缩会使用更高码率和更保真的 VP9 编码参数，允许输出接近或略大于源文件来优先保清晰。
-- 大于 6MB 的视频会使用上一版大文件快速压缩策略，轻微压缩约按 42% 源码率作为目标，并使用 `realtime` 编码以提升速度。
-- 大体积或超长视频会消耗较多内存；批量转换时每个文件会独立释放 FFmpeg 引擎，降低卡住概率。
-- 本扩展使用本地打包的 `ffmpeg.wasm` 文件，核心文件位于 `vendor/ffmpeg/`，不依赖你的电脑服务器或外部 CDN。
+## 本地批处理
+
+需要完整执行「先压缩到临时目录、全部成功后原文件改名 `_back`、再移动 WebM 回原文件夹」时，使用本地脚本：
+
+```bash
+./batch_compress_webm.sh /path/to/videos
+```
+
+也可以传入多个文件：
+
+```bash
+./batch_compress_webm.sh 118.mp4 119.mov
+```
+
+脚本依赖本机安装的 `ffmpeg` 和 `ffprobe`。执行前会检查同名 `_back` 文件和 `.webm` 输出文件是否已存在；如果存在冲突，会提示并停止，不会覆盖原文件。
+
+核心 ffmpeg 参数：
+
+```bash
+ffmpeg -i input.mp4 \
+  -map 0:v:0 -map '0:a?' \
+  -vf "scale=600:-2" \
+  -c:v libvpx-vp9 \
+  -crf 31 -b:v 1.5M -maxrate 1.5M -bufsize 3M \
+  -row-mt 1 -deadline good -cpu-used 4 \
+  -pix_fmt yuv420p \
+  -c:a libopus -b:a 96k \
+  output.webm
+```
+
+如果源视频 FPS 超过 `30`，脚本会使用：
+
+```bash
+-vf "fps=30,scale=600:-2"
+```
+
+## 验证
+
+本地脚本会在移动文件前验证：
+
+- 输出文件存在且非空。
+- 输出宽度为 `600`。
+- 输出 FPS 不超过 `30`。
+- 输出格式为 `WebM`。
+
+移动完成后会再次验证 `_back` 原文件备份存在，并汇总每个输出文件的大小、分辨率、FPS、时长。
+
+## 离线运行
+
+插件使用本地打包的 `ffmpeg.wasm` 文件，核心文件位于 `vendor/ffmpeg/`，不依赖你的电脑服务器或外部 CDN。
