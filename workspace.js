@@ -9,7 +9,12 @@ const state = {
   jobs: [],
   isConverting: false,
   logExpanded: false,
-  activeJobId: null
+  activeJobId: null,
+  localHelper: {
+    available: false,
+    checked: false,
+    info: null
+  }
 };
 
 const els = {
@@ -44,6 +49,8 @@ const WEBM_PRESET = {
   crf: 31,
   audioBitrate: "96k"
 };
+
+const LOCAL_HELPER_URL = "http://127.0.0.1:17777";
 
 const STATUS_LABELS = {
   queued: "待转换",
@@ -310,6 +317,50 @@ function updateEngineState(text, busy = false) {
   els.engineState.classList.toggle("is-busy", busy);
 }
 
+function decodeBase64Utf8(value) {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(normalized);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function checkLocalHelper({ quiet = false } = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 1200);
+  try {
+    const response = await fetch(`${LOCAL_HELPER_URL}/health`, {
+      method: "GET",
+      cache: "no-store",
+      signal: controller.signal
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "本地助手不可用");
+    }
+    state.localHelper = {
+      available: true,
+      checked: true,
+      info: data
+    };
+    updateEngineState("本地 FFmpeg");
+    if (!quiet) logLine(`Connected to local native FFmpeg helper: ${data.ffmpeg || "ready"}`);
+    return true;
+  } catch (error) {
+    state.localHelper = {
+      available: false,
+      checked: true,
+      info: null
+    };
+    updateEngineState("浏览器 wasm");
+    if (!quiet) {
+      logLine(`Local FFmpeg helper is not running; fallback to browser wasm. Start it with ./start_local_ffmpeg_server.sh for large files.`);
+    }
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function logLine(message) {
   const stamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
   els.logBox.textContent = `[${stamp}] ${message}\n${els.logBox.textContent}`.slice(0, 12000);
@@ -529,6 +580,76 @@ async function execAndReadOutput(ffmpeg, args, outputName, mimeType, label) {
   return readValidatedOutput(ffmpeg, outputName, mimeType);
 }
 
+function startLocalProgress(job) {
+  return setInterval(() => {
+    if (job.status !== "running") return;
+    job.progress = Math.min(0.94, job.progress + Math.max(0.004, (0.94 - job.progress) * 0.035));
+    render();
+  }, 700);
+}
+
+async function readLocalHelperError(response) {
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return data.error || text || `HTTP ${response.status}`;
+  } catch {
+    return text || `HTTP ${response.status}`;
+  }
+}
+
+async function convertJobWithLocalHelper(job) {
+  const settings = getSettings();
+  const settingsSignature = getSettingsSignature(settings);
+  const extension = getOutputExtension(settings.format);
+  job.outputName = `${sanitizeName(job.file.name)}.${extension}`;
+  job.outputFormat = settings.format;
+  job.outputMime = getOutputMime(settings.format);
+  job.outputSettingsSignature = settingsSignature;
+  job.outputBlob = null;
+  job.outputBytes = 0;
+
+  job.status = "reading";
+  job.progress = 0.04;
+  job.error = "";
+  render();
+
+  job.status = "running";
+  job.progress = 0.08;
+  render();
+
+  logLine(`Local FFmpeg converting ${job.file.name} -> ${job.outputName}`);
+  const progressTimer = startLocalProgress(job);
+  try {
+    const response = await fetch(`${LOCAL_HELPER_URL}/convert?filename=${encodeURIComponent(job.file.name)}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream"
+      },
+      body: job.file
+    });
+    if (!response.ok) {
+      throw new Error(await readLocalHelperError(response));
+    }
+    const encodedName = response.headers.get("X-Output-File-Name-B64");
+    if (encodedName) {
+      job.outputName = decodeBase64Utf8(encodedName);
+    }
+    const blob = await response.blob();
+    await validateVideoBlob(blob);
+    job.outputBlob = blob;
+    job.outputBytes = blob.size;
+    job.progress = 1;
+    job.status = "ready";
+    const width = response.headers.get("X-Video-Width");
+    const height = response.headers.get("X-Video-Height");
+    if (width && height) job.dimensions = `${width}x${height}`;
+    logLine(`Local FFmpeg finished ${job.outputName} (${formatBytes(job.outputBytes)}).`);
+  } finally {
+    clearInterval(progressTimer);
+  }
+}
+
 function getSmallerRetryBitrateKbps(job, currentTargetKbps) {
   const sourceKbps = getSourceBitrateKbps(job);
   if (job.file.size < 3 * 1024 * 1024) {
@@ -648,14 +769,26 @@ async function convertAll() {
   render();
 
   let engineReady = false;
+  const useLocalHelper = await checkLocalHelper({ quiet: true });
+  updateEngineState("转换中", true);
+  if (useLocalHelper) {
+    logLine("Using local native FFmpeg helper for this batch.");
+  } else {
+    logLine("Local native FFmpeg helper unavailable; using browser wasm fallback.");
+  }
   try {
     for (const job of state.jobs) {
       if (!needsConversion(job)) continue;
       state.activeJobId = job.id;
       try {
-        await ensureFFmpeg();
-        engineReady = true;
-        await convertJob(job);
+        if (useLocalHelper) {
+          engineReady = true;
+          await convertJobWithLocalHelper(job);
+        } else {
+          await ensureFFmpeg();
+          engineReady = true;
+          await convertJob(job);
+        }
       } catch (error) {
         job.status = "error";
         job.progress = 0;
@@ -679,7 +812,7 @@ async function convertAll() {
   } finally {
     state.activeJobId = null;
     state.isConverting = false;
-    updateEngineState(engineReady ? "引擎待加载" : "引擎失败");
+    updateEngineState(useLocalHelper ? "本地 FFmpeg" : engineReady ? "浏览器 wasm" : "引擎失败");
     render();
   }
 }
@@ -811,4 +944,5 @@ els.themeToggle.addEventListener("click", () => {
 });
 
 setTheme("light");
+checkLocalHelper({ quiet: true });
 render();
