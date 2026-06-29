@@ -1,6 +1,6 @@
 # Video WebM Compressor
 
-Version: `2.0.5`
+Version: `2.0.6`
 
 Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM with VP9 video and Opus audio.
 
@@ -9,7 +9,7 @@ Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM
 1. 打开 `chrome://extensions/`。
 2. 开启右上角的「开发者模式」。
 3. 点击「加载已解压的扩展程序」。
-4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.5.zip` 后选择解压目录。
+4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.6.zip` 后选择解压目录。
 
 ## 插件转换参数
 
@@ -23,7 +23,7 @@ Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM
 
 插件在浏览器沙盒内运行，只能处理上传文件并下载转换结果；浏览器插件不能直接重命名你磁盘上的原文件。
 
-浏览器内的 `ffmpeg.wasm` 对内存更敏感。插件会优先使用 `VP9 + Opus`，如果遇到 `memory access out of bounds` 这类 wasm 内存崩溃，会自动重试为 `VP9` 视频兼容模式。如果兼容模式仍然内存越界，说明该文件不适合在浏览器插件内转码，需要使用下面的本地批处理脚本。如果 `ffmpeg.exec()` 在结束阶段误报 `startsWith` 这类包装层错误，插件会读取已生成的 WebM 并用浏览器元数据验证输出。
+浏览器内的 `ffmpeg.wasm` 对内存更敏感，VP9 批量编码容易触发 `memory access out of bounds`。从 `2.0.6` 开始，插件点击「开始转换」时默认要求连接本地原生 FFmpeg 助手；如果助手没有启动，会直接提示启动助手，不再自动回退到浏览器 wasm 转码。
 
 插件转换失败不是因为没有带 FFmpeg。插件已经内置 `vendor/ffmpeg/` 下的 `ffmpeg.wasm`。失败的主要原因是浏览器 wasm 环境的内存限制，尤其是 VP9 批量编码时更容易触发。
 
@@ -50,7 +50,7 @@ Listening on http://127.0.0.1:17777
 Keep this window open while using the Chrome extension.
 ```
 
-然后回到插件里点击「开始转换」。插件会优先使用本地原生 FFmpeg；如果助手没有启动，才会回退到浏览器 `ffmpeg.wasm`。
+然后回到插件里点击「开始转换」。插件会使用本地原生 FFmpeg；如果助手没有启动，会提示先启动助手，不会再使用浏览器 `ffmpeg.wasm` 硬转 VP9。
 
 本地助手只绑定 `127.0.0.1:17777`，只允许本机访问。插件会把上传的视频发到这个本机端口，压缩完成后取回 WebM，再使用原来的下载逻辑保存到下载文件夹。
 

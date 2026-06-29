@@ -15,7 +15,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("VIDEO_WEBM_HELPER_PORT", "17777"))
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or os.path.join(ROOT_DIR, "tools", "ffmpeg", "ffmpeg")
 FFPROBE_BIN = os.environ.get("FFPROBE_BIN") or os.path.join(ROOT_DIR, "tools", "ffmpeg", "ffprobe")
-VERSION = "2.0.5"
+VERSION = "2.0.6"
 
 
 def resolve_tool(path, fallback_name):
@@ -95,7 +95,7 @@ def safe_stem(filename):
 
 
 class Handler(BaseHTTPRequestHandler):
-  server_version = "VideoWebmLocalHelper/2.0.5"
+  server_version = "VideoWebmLocalHelper/2.0.6"
 
   def log_message(self, fmt, *args):
     sys.stdout.write("%s - %s\n" % (self.address_string(), fmt % args))

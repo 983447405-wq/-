@@ -51,6 +51,7 @@ const WEBM_PRESET = {
 };
 
 const LOCAL_HELPER_URL = "http://127.0.0.1:17777";
+const LOCAL_HELPER_REQUIRED_MESSAGE = "未连接本地 FFmpeg 助手。请先双击 start_local_ffmpeg_server.command，看到 Listening on http://127.0.0.1:17777 后再点击开始转换。";
 
 const STATUS_LABELS = {
   queued: "待转换",
@@ -351,9 +352,9 @@ async function checkLocalHelper({ quiet = false } = {}) {
       checked: true,
       info: null
     };
-    updateEngineState("浏览器 wasm");
+    updateEngineState("需本地助手");
     if (!quiet) {
-      logLine(`Local FFmpeg helper is not running; fallback to browser wasm. Start it with ./start_local_ffmpeg_server.sh for large files.`);
+      logLine(LOCAL_HELPER_REQUIRED_MESSAGE);
     }
     return false;
   } finally {
@@ -501,7 +502,7 @@ function isWasmMemoryError(error) {
 }
 
 function makeLocalFallbackError() {
-  return new Error("浏览器内 VP9 转码内存不足。这个文件请使用本地 batch_compress_webm.sh 脚本处理。");
+  return new Error("浏览器内 VP9 转码内存不足。请启动本地 FFmpeg 助手后重新转换。");
 }
 
 function validateVideoBlob(blob) {
@@ -774,21 +775,26 @@ async function convertAll() {
   if (useLocalHelper) {
     logLine("Using local native FFmpeg helper for this batch.");
   } else {
-    logLine("Local native FFmpeg helper unavailable; using browser wasm fallback.");
+    logLine(LOCAL_HELPER_REQUIRED_MESSAGE);
+    for (const job of state.jobs) {
+      if (!needsConversion(job)) continue;
+      job.status = "error";
+      job.progress = 0;
+      job.error = LOCAL_HELPER_REQUIRED_MESSAGE;
+    }
+    state.activeJobId = null;
+    state.isConverting = false;
+    updateEngineState("需本地助手");
+    render();
+    return;
   }
   try {
     for (const job of state.jobs) {
       if (!needsConversion(job)) continue;
       state.activeJobId = job.id;
       try {
-        if (useLocalHelper) {
-          engineReady = true;
-          await convertJobWithLocalHelper(job);
-        } else {
-          await ensureFFmpeg();
-          engineReady = true;
-          await convertJob(job);
-        }
+        engineReady = true;
+        await convertJobWithLocalHelper(job);
       } catch (error) {
         job.status = "error";
         job.progress = 0;
@@ -812,7 +818,7 @@ async function convertAll() {
   } finally {
     state.activeJobId = null;
     state.isConverting = false;
-    updateEngineState(useLocalHelper ? "本地 FFmpeg" : engineReady ? "浏览器 wasm" : "引擎失败");
+    updateEngineState(useLocalHelper ? "本地 FFmpeg" : engineReady ? "需本地助手" : "引擎失败");
     render();
   }
 }
