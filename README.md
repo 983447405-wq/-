@@ -1,15 +1,26 @@
 # Video WebM Compressor
 
-Version: `2.0.6`
+Version: `2.0.7`
 
-Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM with VP9 video and Opus audio.
+Chrome MV3 extension plus a local native FFmpeg helper for converting videos to WebM with VP9 video and Opus audio.
 
 ## Chrome 插件安装
 
 1. 打开 `chrome://extensions/`。
 2. 开启右上角的「开发者模式」。
 3. 点击「加载已解压的扩展程序」。
-4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.6.zip` 后选择解压目录。
+4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.7.zip` 后选择解压目录。
+5. 执行一次本地助手自启动安装：
+
+```bash
+./install_local_helper_autostart.sh
+```
+
+Mac 用户也可以双击：
+
+```text
+install_local_helper_autostart.command
+```
 
 ## 插件转换参数
 
@@ -21,17 +32,31 @@ Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM
 - VP9 使用 CRF 受限质量模式：`-crf 31 -b:v 1.5M -maxrate 1.5M -bufsize 3M`。
 - 像素格式固定为 `yuv420p`。
 
-插件在浏览器沙盒内运行，只能处理上传文件并下载转换结果；浏览器插件不能直接重命名你磁盘上的原文件。
+插件在浏览器沙盒内运行，负责选择文件、显示进度和下载结果；真正的视频压缩由本机 `local_ffmpeg_server.py` 调用原生 FFmpeg 完成。
 
-浏览器内的 `ffmpeg.wasm` 对内存更敏感，VP9 批量编码容易触发 `memory access out of bounds`。从 `2.0.6` 开始，插件点击「开始转换」时默认要求连接本地原生 FFmpeg 助手；如果助手没有启动，会直接提示启动助手，不再自动回退到浏览器 wasm 转码。
+浏览器插件不能直接执行 macOS/Linux/Windows 的原生 `ffmpeg` 可执行文件，所以需要本地助手。自启动安装完成后，助手会在登录系统时自动运行；插件点击「开始转换」时会连接 `http://127.0.0.1:17777`。
 
-插件转换失败不是因为没有带 FFmpeg。插件已经内置 `vendor/ffmpeg/` 下的 `ffmpeg.wasm`。失败的主要原因是浏览器 wasm 环境的内存限制，尤其是 VP9 批量编码时更容易触发。
+如果助手没有运行，插件会提示安装或启动本地助手，不再回退到浏览器 `ffmpeg.wasm`，避免 VP9 wasm 内存不足。
 
-Chrome 插件不能直接执行 macOS/Linux/Windows 的原生 `ffmpeg` 可执行文件，所以单纯把原生二进制放进插件目录不能绕过浏览器沙盒。`2.0.5` 新增了本地助手模式：插件 UI 仍在浏览器里，真正转码由本机 `local_ffmpeg_server.py` 调用原生 FFmpeg 完成。
+压缩完成后，插件优先使用 `chrome.downloads` 下载到同一个文件夹。如果不是以 Chrome 插件方式打开页面，下载会退回为浏览器普通下载。
 
-## 推荐：本地原生 FFmpeg 助手
+## 本地原生 FFmpeg 助手
 
-大文件或批量压缩时，先启动本地助手：
+推荐只安装一次自启动：
+
+```bash
+./install_local_helper_autostart.sh
+```
+
+安装后会立即启动，并写入：
+
+```text
+~/Library/LaunchAgents/com.video-webm-compressor.helper.plist
+```
+
+以后登录系统会自动运行，不需要每次双击。
+
+临时手动启动仍可使用：
 
 ```bash
 ./start_local_ffmpeg_server.sh
@@ -43,18 +68,15 @@ Mac 用户也可以双击：
 start_local_ffmpeg_server.command
 ```
 
-看到类似下面的信息后，保持这个窗口打开：
+健康检查地址：
 
 ```text
-Listening on http://127.0.0.1:17777
-Keep this window open while using the Chrome extension.
+http://127.0.0.1:17777/health
 ```
-
-然后回到插件里点击「开始转换」。插件会使用本地原生 FFmpeg；如果助手没有启动，会提示先启动助手，不会再使用浏览器 `ffmpeg.wasm` 硬转 VP9。
 
 本地助手只绑定 `127.0.0.1:17777`，只允许本机访问。插件会把上传的视频发到这个本机端口，压缩完成后取回 WebM，再使用原来的下载逻辑保存到下载文件夹。
 
-严格执行 VP9 + Opus、批量稳定压缩、原文件 `_back` 备份和最终验证时，以本地 `batch_compress_webm.sh` 为准。Chrome 插件无法直接改名磁盘原文件，也无法保证浏览器 wasm 对所有视频稳定完成 VP9 编码。
+严格执行 VP9 + Opus、批量稳定压缩、原文件 `_back` 备份和最终验证时，以本地 `batch_compress_webm.sh` 为准。Chrome 插件无法直接改名磁盘原文件。
 
 ## 本地批处理
 
@@ -112,6 +134,4 @@ ffmpeg -i input.mp4 \
 
 ## 离线运行
 
-插件使用本地打包的 `ffmpeg.wasm` 文件，核心文件位于 `vendor/ffmpeg/`，不依赖你的电脑服务器或外部 CDN。
-
-本地批处理脚本使用项目内置的原生 FFmpeg 文件，核心文件位于 `tools/ffmpeg/`。把整个项目目录发给其他 macOS 用户后，对方可以直接运行 `./batch_compress_webm.sh /path/to/videos`。如果要上架 Chrome 插件商店，建议上架包只保留插件运行需要的 `vendor/ffmpeg/`，原生 `tools/ffmpeg/` 作为 GitHub Release 或本地脚本包提供，因为 Chrome 插件无法执行这些原生二进制。
+插件和本地助手都使用项目内文件，不依赖你的电脑服务器或外部 CDN。本地助手和批处理脚本使用项目内置的原生 FFmpeg 文件，核心文件位于 `tools/ffmpeg/`。

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Video WebM Compressor",
   "description": "Batch convert uploaded videos to WebM using VP9, Opus, 600px width, and capped 30fps.",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "permissions": [
     "downloads",
     "sidePanel"
@@ -22,6 +22,6 @@
   },
   "options_page": "workspace.html",
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'; connect-src 'self' http://127.0.0.1:17777 http://localhost:17777;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:17777 http://localhost:17777;"
   }
 }
