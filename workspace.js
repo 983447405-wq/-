@@ -274,7 +274,7 @@ function getPrimaryCodec(settings) {
 }
 
 function getFallbackCodec(codec) {
-  return "vp9";
+  return null;
 }
 
 function getTargetBitrateKbps(job, settings) {
@@ -282,20 +282,21 @@ function getTargetBitrateKbps(job, settings) {
 }
 
 function buildOutputArgs(settings, outputName, options = {}) {
+  const { includeAudio = true } = options;
+  const audioArgs = includeAudio
+    ? ["-map", "0:a?", "-c:a", "libopus", "-b:a", WEBM_PRESET.audioBitrate]
+    : ["-an"];
   return [
     "-map", "0:v:0",
-    "-map", "0:a?",
+    ...audioArgs,
     "-c:v", "libvpx-vp9",
     "-crf", String(WEBM_PRESET.crf),
     "-b:v", WEBM_PRESET.videoBitrate,
     "-maxrate", WEBM_PRESET.maxrate,
     "-bufsize", WEBM_PRESET.bufsize,
-    "-row-mt", "1",
     "-deadline", "good",
     "-cpu-used", "4",
     "-pix_fmt", "yuv420p",
-    "-c:a", "libopus",
-    "-b:a", WEBM_PRESET.audioBitrate,
     outputName
   ];
 }
@@ -491,36 +492,32 @@ async function convertJob(job) {
   logLine(`Converting ${job.file.name} -> ${job.outputName}`);
   const targetBitrateKbps = getTargetBitrateKbps(job, settings);
   const primaryCodec = getPrimaryCodec(settings);
-  const fallbackCodec = getFallbackCodec(primaryCodec);
-  let activeCodec = primaryCodec;
   if (settings.format === "webm") {
-    logLine(`Target video bitrate: ${targetBitrateKbps} kbps (${primaryCodec.toUpperCase()}).`);
+    logLine(`Target video bitrate: ${targetBitrateKbps} kbps (${primaryCodec.toUpperCase()} + OPUS).`);
   }
   let exitCode;
   try {
     exitCode = await ffmpeg.exec([
       ...inputArgs,
-      ...buildOutputArgs(settings, outputName, { codec: primaryCodec, targetBitrateKbps, sourceBytes: job.file.size })
+      ...buildOutputArgs(settings, outputName, { includeAudio: true })
     ]);
   } catch (error) {
     if (settings.format !== "webm") throw error;
-    logLine(`${primaryCodec.toUpperCase()} failed: ${getErrorMessage(error)}; retrying WebM with ${fallbackCodec.toUpperCase()}.`);
+    logLine(`VP9 + Opus failed in browser wasm: ${getErrorMessage(error)}; retrying VP9 video-only compatibility mode.`);
     await reloadFFmpeg();
     ffmpeg = state.ffmpeg;
     await ffmpeg.writeFile(job.inputName, await fetchFile(job.file));
-    activeCodec = fallbackCodec;
     exitCode = await ffmpeg.exec([
       ...inputArgs,
-      ...buildOutputArgs(settings, outputName, { codec: fallbackCodec, targetBitrateKbps, sourceBytes: job.file.size })
+      ...buildOutputArgs(settings, outputName, { includeAudio: false })
     ]);
   }
   if (exitCode !== 0 && settings.format === "webm") {
-    logLine(`${primaryCodec.toUpperCase()} failed with code ${exitCode}; retrying WebM with ${fallbackCodec.toUpperCase()}.`);
+    logLine(`VP9 + Opus failed with code ${exitCode}; retrying VP9 video-only compatibility mode.`);
     await cleanupFFmpegFiles(outputName);
-    activeCodec = fallbackCodec;
     exitCode = await ffmpeg.exec([
       ...inputArgs,
-      ...buildOutputArgs(settings, outputName, { codec: fallbackCodec, targetBitrateKbps, sourceBytes: job.file.size })
+      ...buildOutputArgs(settings, outputName, { includeAudio: false })
     ]);
   }
   if (exitCode !== 0) {
@@ -535,10 +532,7 @@ async function convertJob(job) {
     exitCode = await ffmpeg.exec([
       ...inputArgs,
       ...buildOutputArgs(settings, outputName, {
-        codec: activeCodec,
-        targetBitrateKbps: retryBitrateKbps,
-        sourceBytes: job.file.size,
-        retrySmaller: true
+        includeAudio: false
       })
     ]);
     if (exitCode === 0) {

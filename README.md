@@ -1,6 +1,6 @@
 # Video WebM Compressor
 
-Version: `2.0.0`
+Version: `2.0.1`
 
 Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM with VP9 video and Opus audio.
 
@@ -9,7 +9,7 @@ Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM
 1. 打开 `chrome://extensions/`。
 2. 开启右上角的「开发者模式」。
 3. 点击「加载已解压的扩展程序」。
-4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.0.zip` 后选择解压目录。
+4. 选择本目录：`/Users/xy/Downloads/谷歌插件/浏览器插件-视频转webp`，或解压 `dist/video-webm-webp-compressor-2.0.1.zip` 后选择解压目录。
 
 ## 插件转换参数
 
@@ -22,6 +22,8 @@ Chrome MV3 extension and local ffmpeg batch script for converting videos to WebM
 - 像素格式固定为 `yuv420p`。
 
 插件在浏览器沙盒内运行，只能处理上传文件并下载转换结果；浏览器插件不能直接重命名你磁盘上的原文件。
+
+浏览器内的 `ffmpeg.wasm` 对内存更敏感。插件会优先使用 `VP9 + Opus`，如果遇到 `memory access out of bounds` 这类 wasm 内存崩溃，会自动重试为 `VP9` 视频兼容模式以保证转换完成。需要严格保留 Opus 音频和原文件 `_back` 备份流程时，使用下面的本地批处理脚本。
 
 ## 本地批处理
 
