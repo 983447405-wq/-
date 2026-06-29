@@ -445,6 +445,14 @@ function isWrapperStartsWithError(error) {
   return getErrorMessage(error).includes("startsWith");
 }
 
+function isWasmMemoryError(error) {
+  return getErrorMessage(error).includes("memory access out of bounds");
+}
+
+function makeLocalFallbackError() {
+  return new Error("浏览器内 VP9 转码内存不足。这个文件请使用本地 batch_compress_webm.sh 脚本处理。");
+}
+
 function validateVideoBlob(blob) {
   return new Promise((resolve, reject) => {
     if (!blob || blob.size <= 0) {
@@ -587,10 +595,18 @@ async function convertJob(job) {
     await reloadFFmpeg();
     ffmpeg = state.ffmpeg;
     await ffmpeg.writeFile(job.inputName, await fetchFile(job.file));
-    job.outputBlob = await execAndReadOutput(ffmpeg, [
-      ...inputArgs,
-      ...buildOutputArgs(settings, outputName, { includeAudio: false })
-    ], outputName, job.outputMime, "VP9 video-only");
+    try {
+      job.outputBlob = await execAndReadOutput(ffmpeg, [
+        ...inputArgs,
+        ...buildOutputArgs(settings, outputName, { includeAudio: false })
+      ], outputName, job.outputMime, "VP9 video-only");
+    } catch (fallbackError) {
+      if (isWasmMemoryError(fallbackError)) {
+        logLine("Browser VP9 fallback also exceeded wasm memory. Use the local ffmpeg script for this file.");
+        throw makeLocalFallbackError();
+      }
+      throw fallbackError;
+    }
   }
 
   if (shouldRetryForSmallerOutput(job, settings)) {
