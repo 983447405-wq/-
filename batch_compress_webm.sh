@@ -6,11 +6,34 @@ usage() {
   printf 'Compress videos to WebM VP9/Opus, then rename originals with _back after all conversions succeed.\n'
 }
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+BUNDLED_FFMPEG="$SCRIPT_DIR/tools/ffmpeg/ffmpeg"
+BUNDLED_FFPROBE="$SCRIPT_DIR/tools/ffmpeg/ffprobe"
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   fi
+}
+
+resolve_tool() {
+  local name="$1"
+  local bundled="$2"
+
+  if [[ -x "$bundled" ]]; then
+    printf '%s\n' "$bundled"
+    return
+  fi
+
+  if command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+    return
+  fi
+
+  printf 'Missing required command: %s\n' "$name" >&2
+  printf 'Expected bundled binary at: %s\n' "$bundled" >&2
+  exit 1
 }
 
 fps_decimal() {
@@ -25,7 +48,7 @@ fps_decimal() {
 fps_filter_for() {
   local input="$1"
   local rate fps
-  rate="$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=noprint_wrappers=1:nokey=1 "$input")"
+  rate="$("$FFPROBE_BIN" -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=noprint_wrappers=1:nokey=1 "$input")"
   fps="$(fps_decimal "$rate")"
   if awk -v fps="$fps" 'BEGIN { exit !(fps > 30.0001) }'; then
     printf 'fps=30,scale=600:-2'
@@ -35,7 +58,7 @@ fps_filter_for() {
 }
 
 probe_field() {
-  ffprobe -v error "$@"
+  "$FFPROBE_BIN" -v error "$@"
 }
 
 if [[ $# -eq 0 ]]; then
@@ -43,9 +66,12 @@ if [[ $# -eq 0 ]]; then
   exit 2
 fi
 
-require_command ffmpeg
-require_command ffprobe
 require_command awk
+FFMPEG_BIN="$(resolve_tool ffmpeg "$BUNDLED_FFMPEG")"
+FFPROBE_BIN="$(resolve_tool ffprobe "$BUNDLED_FFPROBE")"
+
+printf 'Using ffmpeg: %s\n' "$FFMPEG_BIN"
+printf 'Using ffprobe: %s\n\n' "$FFPROBE_BIN"
 
 inputs=()
 for arg in "$@"; do
@@ -119,7 +145,7 @@ for i in "${!inputs[@]}"; do
   vf="$(fps_filter_for "$input")"
 
   printf 'Compressing: %s\n' "$input"
-  ffmpeg -hide_banner -y -i "$input" \
+  "$FFMPEG_BIN" -hide_banner -y -i "$input" \
     -map "0:v:0" -map "0:a?" \
     -vf "$vf" \
     -c:v libvpx-vp9 \
